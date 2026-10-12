@@ -118,11 +118,11 @@ FOREST approaches scientific research as a **continuous, evidence-driven process
 
 | Research Task | Dataset | Metric | Baseline | FOREST | Improvement |
 |---|---|---|---:|---:|---:|
-| PDE Gradient Optimization | Darcy64 | Relative Gradient L2 ↓ | 0.303645 | **0.256810** | **15.42% ↓** |
-| Time-Series Forecasting (Study 1) | ETTh1 | MAE ↓ | 2.914060 | **2.553352** | **12.38% ↓** |
-| PDE Solution Optimization | Darcy64 | Relative L2 ↓ | 0.108735 | **0.099608** | **8.39% ↓** |
-| Time-Series Forecasting (Study 2) | ETTh1 | MAE ↓ | 2.913240 | **2.728309** | **6.35% ↓** |
-| Medical Image Classification | BloodMNIST | Macro-F1 ↑ | 0.965410 | **0.969351** | **+0.394 pp** |
+| PDE Gradient Optimization | Darcy64 | Relative Gradient L2 | 0.303645 | **0.256810** | **15.42% ** |
+| Time-Series Forecasting (Study 1) | ETTh1 | MAE | 2.914060 | **2.553352** | **12.38% ** |
+| PDE Solution Optimization | Darcy64 | Relative L2 | 0.108735 | **0.099608** | **8.39% ** |
+| Time-Series Forecasting (Study 2) | ETTh1 | MAE | 2.913240 | **2.728309** | **6.35% ** |
+| Medical Image Classification | BloodMNIST | Macro-F1 | 0.965410 | **0.969351** | **+0.394 pp** |
 
 ### Research Modes
 

@@ -74,6 +74,64 @@ def _parse_model_json_object(text):
     raise ValueError('Model response did not contain a valid JSON object')
 
 
+def _increase_local_output_cap(client):
+    """Double one explicitly effective local cap, bounded to 32K tokens."""
+    if getattr(client, 'api', None) == 'codex_cli':
+        return False
+    config = getattr(client, 'config', None)
+    if not isinstance(config, dict):
+        return False
+    base = getattr(client, 'base', '')
+    from urllib.parse import urlparse
+    host = urlparse(base).hostname
+    if getattr(client, 'api', None) != 'ollama' and host not in ('localhost', '127.0.0.1', '::1'):
+        return False
+    key = 'max_output_tokens' if 'max_output_tokens' in config else 'max_tokens'
+    try:
+        current = int(config.get(key, 2048))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if current < 1:
+        return False
+    increased = min(current * 2, 32768)
+    if increased <= current:
+        return False
+    client.config = {**config, key: increased}
+    return True
+
+
+def _complete_with_output_recovery(client, messages, *, json_mode=True, tools=None, retries=0, output_stage='planning'):
+    """Retry only explicit output truncation; never reuse a partial response."""
+    failures = []
+    retry_count = 0
+    retry_messages = messages
+    while True:
+        started = time.monotonic()
+        try:
+            response = _complete(client, retry_messages, output_stage=output_stage, json_mode=json_mode, tools=tools)
+        except ProviderError as error:
+            elapsed = time.monotonic() - started
+            failure = {'usage': error.usage or {}, 'model': error.model,
+                       'elapsed': elapsed, 'code': error.code,
+                       'request_id': error.request_id, 'ambiguous': error.ambiguous}
+            can_retry = (retry_count < min(1, max(0, int(retries))) and
+                         error.code == 'incomplete_response' and
+                         error.incomplete_reason == 'max_output_tokens' and
+                         not error.ambiguous and _increase_local_output_cap(client))
+            if can_retry:
+                failures.append(failure)
+                retry_count += 1
+                retry_messages = [*messages, {'role': 'user', 'content':
+                    'The previous response was truncated at the output limit. Re-read the original request and return the complete JSON response from the beginning. Do not continue from or rely on any partial response.'}]
+                continue
+            error.output_recovery_history = [{**item, 'elapsed_seconds': item.get('elapsed', 0)} for item in [*failures, failure]]
+            error.output_recovery_failures = [*failures, failure]
+            error.output_recovery_request_count = len(failures) + 1
+            error.output_recovery_retries_used = retry_count
+            raise
+        return dict(response), failures, retry_count + 1
+
+
 def _decode(response, native):
     if native:
         calls = response.get('tool_calls', [])
@@ -117,7 +175,7 @@ def _complete(client, messages, *, output_stage, **kwargs):
 
 
 def context_model_json(client, messages, workspace, *, char_hint=48000, materials=None, parse_result=True,
-                       output_stage='planning'):
+                       output_stage='planning', output_retry_attempts=None):
     """Return (JSON object, aggregate_response), retaining every real exchange.
 
     Caller constructs the authorized ModelClient. No provider settings, model
@@ -150,18 +208,51 @@ def context_model_json(client, messages, workspace, *, char_hint=48000, material
     managed_initial_requests = 0
     managed_initial_responses = []
     managed_initial_failures = []
+    output_retries_remaining = None if output_retry_attempts is None else min(1, max(0, int(output_retry_attempts)))
+
+    def complete_messages(request_messages, **kwargs):
+        nonlocal output_retries_remaining
+        if output_retries_remaining is None:
+            return _complete(client, request_messages, output_stage=output_stage, **kwargs)
+        if isinstance(client, ModelClient):
+            # The current provider owns native recovery and its budget receipts.
+            # Do not layer a second retry around it. Only local idea generation
+            # opts into this narrower one-retry policy.
+            from urllib.parse import urlparse
+            local = client.api == 'ollama' or urlparse(client.base).hostname in ('localhost', '127.0.0.1', '::1')
+            if local and client.api != 'codex_cli':
+                client.config = {**client.config, 'output_recovery_attempts': output_retries_remaining}
+            response = _complete(client, request_messages, output_stage=output_stage, **kwargs)
+        else:
+            try:
+                response, failures, count = _complete_with_output_recovery(client, request_messages,
+                    retries=output_retries_remaining, output_stage=output_stage, **kwargs)
+            except ProviderError as error:
+                output_retries_remaining -= getattr(error, 'output_recovery_retries_used', 0)
+                raise
+            if failures:
+                response['usage'] = _usage_total([*failures, response])
+                response['elapsed'] = sum(item.get('elapsed', 0) for item in failures) + response.get('elapsed', 0)
+                response['output_recovery'] = {'request_count': count, 'attempts': failures}
+                atomic_json(directory / 'direct_output_recovery.json', failures)
+        count = response.get('output_recovery', {}).get('request_count', 1)
+        output_retries_remaining = max(0, output_retries_remaining - count + 1)
+        if count > 1:
+            response['output_recovery_attempts'] = count - 1
+        return response
+
     # Preserve the normal JSON-only request for already fitting documents.
     # Planning with omitted optional evidence keeps retrieval tools available.
     if not materials and can_attempt_direct(client,messages,int(char_hint or 48000)):
         try:
-            response = _complete(client,messages,output_stage=output_stage)
+            response = complete_messages(messages)
         except ProviderError as error:
             atomic_json(directory / 'direct_failure.json', {'code': error.code, 'request_id': error.request_id,
                         'usage': error.usage, 'ambiguous': error.ambiguous,
                         'incomplete_reason': error.incomplete_reason,
                         'output_recovery_history': getattr(error, 'output_recovery_history', []),
                         'partial_output': error.partial_output})
-            if (error.code == 'incomplete_response' and error.incomplete_reason == 'max_output_tokens'
+            if (output_retry_attempts is None and error.code == 'incomplete_response' and error.incomplete_reason == 'max_output_tokens'
                     and not error.ambiguous):
                 direct_failure = error
                 attempts = getattr(error, 'output_recovery_history', None) or [{
@@ -205,7 +296,7 @@ def context_model_json(client, messages, workspace, *, char_hint=48000, material
                     )},
                 ]
                 try:
-                    repaired = _complete(client,repair_messages,output_stage=output_stage)
+                    repaired = complete_messages(repair_messages)
                 except BudgetExceeded as repair_error:
                     atomic_json(directory / 'direct_repair_failure.json', {
                         'error': str(repair_error),
@@ -271,7 +362,7 @@ def context_model_json(client, messages, workspace, *, char_hint=48000, material
                         'original_input_characters':message_chars(messages)}
                     return proposal, repaired
             if direct_failure is None and not repair_attempted:
-                response = {**response, 'model_requests': 1, 'context_session_path': str(directory),
+                response = {**response, 'model_requests': response.get('output_recovery', {}).get('request_count', 1), 'context_session_path': str(directory),
                             'context_delivery':'direct_full_originals','original_input_characters':message_chars(messages)}
                 return proposal, response
     store = ContextStore(directory)
@@ -333,7 +424,7 @@ def context_model_json(client, messages, workspace, *, char_hint=48000, material
         save()
         started = time.monotonic()
         try:
-            response = _complete(client,messages,output_stage=output_stage,
+            response = complete_messages(messages,
                                  json_mode=not native,tools=tools if native else None)
         except ProviderError as error:
             attempts=getattr(error,'output_recovery_history',None) or [{'code': error.code, 'request_id': error.request_id,
@@ -345,7 +436,7 @@ def context_model_json(client, messages, workspace, *, char_hint=48000, material
             state['responses'].extend({'usage':item.get('usage'), 'model':item.get('model',error.model),
                 'elapsed':item.get('elapsed_seconds',0)} for item in attempts if item.get('usage'))
             recovered = recover_context_rejection(state, error)
-            if (not recovered and error.code == 'incomplete_response'
+            if (output_retry_attempts is None and not recovered and error.code == 'incomplete_response'
                     and error.incomplete_reason == 'max_output_tokens' and not error.ambiguous):
                 from research.agents.output_budget import recovery_attempt_limit
                 limit=recovery_attempt_limit(client.config)

@@ -125,6 +125,8 @@ def adopt(ident:str,body:dict=Body(default={})):
                 return g
         if body.get('expected_revision',p.revision)!=p.revision:
             error('REVISION_CONFLICT','The project changed; refresh before adopting the idea',409)
+        if any(node.get('adopted_idea_id')==idea.id for node in g['nodes']):
+            error('IDEA_ALREADY_ADOPTED','This idea has already been adopted; use its existing execution path',409)
         original=deepcopy(g); commands=[]
         config=deepcopy(body.get('config',idea.data.get('experiment_config',{})))
         if not isinstance(config,dict): error('INVALID_EXPERIMENT_CONFIG','Experiment config must be an object',422)

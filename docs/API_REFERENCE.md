@@ -1556,7 +1556,7 @@ Known domain failures: `400` Scheduling/input errors; `404` NOT_FOUND.
 
 #### `POST /api/ideas/{ident}/adopt`
 
-Create hypothesis plus configured experiment, or hypothesis/implementation/experiment nodes when implementation is needed. Optional expected_revision is the project graph revision. request_id is 1..120 characters and adoption-specific; same idea retry returns current graph. inputs accepts up to 50 explicit path/reference inputs in this project. config is the executable experiment configuration, not a dummy case. Return the updated GraphState as one graph edit/undo.
+Create hypothesis plus configured experiment, or hypothesis/implementation/experiment nodes when implementation is needed. Optional expected_revision is the project graph revision. request_id is 1..120 characters and adoption-specific; replaying the same request_id for the same idea returns the current graph. An idea that already has nodes in the graph rejects a second adoption without that receipt with IDEA_ALREADY_ADOPTED (409). Undoing the adoption permits a new path. inputs accepts up to 50 explicit path/reference inputs in this project. config is the executable experiment configuration, not a dummy case. Return the updated GraphState as one graph edit/undo.
 
 | Parameter | Location | Type | Required | Default / description |
 | --- | --- | --- | --- | --- |
@@ -1566,7 +1566,7 @@ Body: `application/json`: `IdeaAdoptRequest`; optional.
 
 Success `200`: `application/json`: `GraphState`.
 
-Known domain failures: `404` NOT_FOUND; `409` REVISION_CONFLICT, REQUEST_ID_CONFLICT or BRANCH_INACTIVE; `422` INVALID_REQUEST_ID, INVALID_EXPERIMENT_CONFIG, INVALID_INPUTS, CROSS_PROJECT, MISSING_BRANCH, INVALID_TITLE or INVALID_INSTRUCTIONS.
+Known domain failures: `404` NOT_FOUND; `409` REVISION_CONFLICT, REQUEST_ID_CONFLICT, BRANCH_INACTIVE or IDEA_ALREADY_ADOPTED; `422` INVALID_REQUEST_ID, INVALID_EXPERIMENT_CONFIG, INVALID_INPUTS, CROSS_PROJECT, MISSING_BRANCH, INVALID_TITLE or INVALID_INSTRUCTIONS.
 
 #### `PATCH /api/projects/{ident}/objective`
 

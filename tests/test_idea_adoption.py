@@ -93,6 +93,44 @@ def case_atomic_validation_and_concurrent_receipt(client):
         assert s.scalar(select(func.count()).select_from(CommandReceipt).where(CommandReceipt.project_id==p['id']))==1
 
 
+def case_repeat_adoption_rejected_without_shared_receipt(client):
+    p=create(client); i=idea(client,p)
+    g=ok(adopted(client,i))
+    for body in ({},{'request_id':'different-adoption','title':'Another title'}):
+        rejected=adopted(client,i,**body)
+        assert rejected.status_code==409,rejected.text
+        assert rejected.json()['detail']['code']=='IDEA_ALREADY_ADOPTED'
+        assert graph(client,p)==g
+    assert ok(client.get(f"/api/ideas/{i['id']}"))['status']=='adopted'
+    assert ok(client.get(f"/api/projects/{p['id']}/runs"))==[]
+    from sqlalchemy import select,func
+    from services.api.db import Session,CommandReceipt
+    with Session() as s:
+        assert s.scalar(select(func.count()).select_from(CommandReceipt).where(CommandReceipt.project_id==p['id']))==1
+
+
+def case_adoption_after_undo_can_create_a_new_path(client):
+    p=create(client); i=idea(client,p)
+    first=ok(adopted(client,i))
+    undone=ok(command(client,p,'undo'))['graph']
+    assert undone['nodes']==[]
+    second=ok(adopted(client,i,request_id='after-undo',expected_revision=undone['revision']))
+    assert second['revision']==undone['revision']+1 and len(second['nodes'])==3
+    assert {n['id'] for n in first['nodes']}.isdisjoint(n['id'] for n in second['nodes'])
+    assert ok(client.get(f"/api/projects/{p['id']}/runs"))==[]
+
+
+def case_concurrent_adoptions_without_shared_receipt(client):
+    p=create(client); i=idea(client,p)
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        results=list(pool.map(lambda _:adopted(client,i),range(5)))
+    assert sorted(r.status_code for r in results)==[200,409,409,409,409],[(r.status_code,r.text) for r in results]
+    assert all(r.json()['detail']['code']=='IDEA_ALREADY_ADOPTED' for r in results if r.status_code==409)
+    g=graph(client,p)
+    assert g['revision']==1 and len(g['nodes'])==3 and len(g['edges'])==2
+    assert ok(client.get(f"/api/projects/{p['id']}/runs"))==[]
+
+
 def case_completed_producer_file_reused_but_stale_rejected(client):
     p=create(client); i=idea(client,p)
     g=ok(adopted(client,i,config={'kind':'command','command':['python','pilot.py']}))

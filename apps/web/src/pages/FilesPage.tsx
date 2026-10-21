@@ -972,6 +972,14 @@ function FileTablePreview({
       ) : (
         data && (
           <>
+            {data.truncated_columns && (
+              <div className="file-table-heading" role="status">
+                {t(
+                  `仅显示 ${data.column_count} 列中的前 ${data.columns.length} 列；其余列未显示。下载原始文件可查看全部列。`,
+                  `Showing the first ${data.columns.length} of ${data.column_count} columns; remaining columns are omitted. Download the original file to view all columns.`,
+                )}
+              </div>
+            )}
             <div className="table-scroll">
               <table>
                 <thead>

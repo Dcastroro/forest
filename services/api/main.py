@@ -505,18 +505,20 @@ def update_settings(body:dict=Body(...)):
 @app.post('/api/settings/cleanup')
 def cleanup(body:dict=Body(...)):
     cutoff=(dt.datetime.now(dt.timezone.utc)-dt.timedelta(days=max(0,int(body.get('days',30))))).isoformat(); removed=0
+    project_scope=body.get('project_id')
     with Session() as reader:
-        projects=list(reader.scalars(select(Project.id).where(Project.id==body['project_id']) if body.get('project_id') else select(Project.id)))
+        projects=list(reader.scalars(select(Project.id).where(Project.id==project_scope) if project_scope and not body.get('clear_edit_history') else select(Project.id)))
     for project_id in sorted(projects):
         with Session.begin() as s:
             from services.worker.scheduler import _lock_project
             project=_lock_project(s,project_id)
-            for run in s.scalars(select(TaskRun).where(TaskRun.project_id==project_id,
-                    TaskRun.finished_at<cutoff,TaskRun.status.in_(TERMINAL)).with_for_update()):
-                from services.interventions.controls import close_unconsumed
-                close_unconsumed(s,run)
-                shutil.rmtree(safe_path(project_dir(project_id),run.output_path),ignore_errors=True)
-                touch_dependents(s,project_id,run.id); s.delete(run); removed+=1
+            if not project_scope or project_id==project_scope:
+                for run in s.scalars(select(TaskRun).where(TaskRun.project_id==project_id,
+                        TaskRun.finished_at<cutoff,TaskRun.status.in_(TERMINAL)).with_for_update()):
+                    from services.interventions.controls import close_unconsumed
+                    close_unconsumed(s,run)
+                    shutil.rmtree(safe_path(project_dir(project_id),run.output_path),ignore_errors=True)
+                    touch_dependents(s,project_id,run.id); s.delete(run); removed+=1
             if body.get('clear_edit_history'):
                 project.graph_meta={key:value for key,value in project.graph_meta.items() if key!='_history'}
     return {'deleted_runs':removed}

@@ -740,6 +740,69 @@ def case_import_auto_mode_preserves_controller_pause_and_cleanup(client, app):
     case_import_running_controller_requires_explicit_start(client, app, mode="auto")
 
 
+def case_cleanup_global_history_preserves_scoped_run_deletion(client, app):
+    import datetime as dt
+    from copy import deepcopy
+    from services.api.common import project_dir
+    from services.api.db import Project, Session, TaskRun
+
+    projects=[create(client),create(client)]
+    before={}
+    run_ids={}
+    outputs={}
+    for project in projects:
+        add_node(client,project)
+        with Session.begin() as session:
+            saved=session.get(Project,project['id'])
+            saved.graph_meta={**saved.graph_meta,'cleanup_marker':project['id']}
+            assert saved.graph_meta['_history']['undo']
+            before[project['id']]=deepcopy(saved.graph_meta)
+            run=TaskRun(project_id=project['id'],request_id='cleanup-fixture',kind='command',
+                        status='completed',finished_at=(dt.datetime.now(dt.timezone.utc)-dt.timedelta(days=90)).isoformat())
+            session.add(run); session.flush()
+            run.output_path=f'runs/{run.id}'
+            run_ids[project['id']]=run.id
+            output=project_dir(project['id'])/run.output_path
+            output.mkdir(parents=True)
+            (output/'retained.txt').write_text('Synthetic cleanup fixture')
+            outputs[project['id']]=output
+
+    selected,other=projects
+    assert ok(client.post('/api/settings/cleanup',json={
+        'days':30,'project_id':selected['id'],'clear_edit_history':False}))=={'deleted_runs':1}
+    with Session() as session:
+        assert session.get(TaskRun,run_ids[selected['id']]) is None
+        assert session.get(TaskRun,run_ids[other['id']]) is not None
+        for project in projects:
+            assert session.get(Project,project['id']).graph_meta==before[project['id']]
+    assert not outputs[selected['id']].exists() and outputs[other['id']].is_dir()
+
+    with Session.begin() as session:
+        run=TaskRun(project_id=selected['id'],request_id='cleanup-second-fixture',kind='command',
+                    status='completed',finished_at=(dt.datetime.now(dt.timezone.utc)-dt.timedelta(days=90)).isoformat())
+        session.add(run); session.flush()
+        run.output_path=f'runs/{run.id}'
+        selected_output=project_dir(selected['id'])/run.output_path
+        selected_output.mkdir(parents=True)
+        (selected_output/'remove.txt').write_text('Synthetic cleanup fixture')
+    assert ok(client.post('/api/settings/cleanup',json={
+        'days':30,'project_id':selected['id'],'clear_edit_history':True}))=={'deleted_runs':1}
+    with Session() as session:
+        assert session.get(TaskRun,run_ids[other['id']]) is not None
+        for project in projects:
+            assert session.get(Project,project['id']).graph_meta=={
+                key:value for key,value in before[project['id']].items() if key!='_history'}
+    assert not selected_output.exists()
+    assert (outputs[other['id']]/'retained.txt').read_text()=='Synthetic cleanup fixture'
+    for project in projects:
+        rejected=command(client,project,'undo')
+        assert rejected.status_code==422,rejected.text
+        assert rejected.json()['detail']['code']=='history_empty'
+        assert len(graph(client,project)['nodes'])==1
+    assert ok(client.post('/api/settings/cleanup',json={'days':30}))=={'deleted_runs':1}
+    assert not outputs[other['id']].exists()
+
+
 def case_export_does_not_follow_config_symlink(client, app):
     p = create(client)
     root = Path(os.environ["FOREST_DATA_DIR"]) / "projects" / p["id"]

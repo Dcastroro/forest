@@ -8,6 +8,7 @@
 .run-evidence-select select { min-width: 0; max-width: 100%; flex: 1; padding: 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); }
 .run-evidence-status, .run-evidence-session { color: var(--muted); }
 .run-evidence-session strong { color: var(--text); }
+.run-evidence-tokens { display: flex; flex-wrap: wrap; flex-basis: 100%; gap: 8px; }
 .run-evidence-session p { flex-basis: 100%; margin: 2px 0; }
 .run-evidence-dependencies button { padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); background: var(--surface); cursor: pointer; }
 .run-evidence-attempts, .run-evidence-files { margin-top: 10px; }

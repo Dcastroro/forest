@@ -31,6 +31,13 @@ function bytes(value: number) {
 }
 
 export function SessionContinuity({ session }: { session: Json }) {
+  const totals = session.usage_error ? undefined : session.usage?.totals;
+  const tokenCounts = [
+    ["input_tokens", "Input tokens"],
+    ["output_tokens", "Output tokens"],
+    ["cached_input_tokens", "Cached input tokens"],
+    ["reasoning_tokens", "Reasoning tokens"],
+  ];
   const lifecycle = session.lifecycle;
   const checkpoint = lifecycle?.checkpoints?.at(-1);
   const recovery = lifecycle?.recovery ?? session.recovery;
@@ -41,16 +48,44 @@ export function SessionContinuity({ session }: { session: Json }) {
       {lifecycle?.round_index !== undefined && (
         <span>Work round {lifecycle.round_index}</span>
       )}
-      {session.status === "waiting" && lifecycle?.state !== "blocked" && session.wait_for?.type === "work_round" && (
-        <span>Checkpoint saved; next work round continues automatically</span>
-      )}
+      {session.status === "waiting" &&
+        lifecycle?.state !== "blocked" &&
+        session.wait_for?.type === "work_round" && (
+          <span>Checkpoint saved; next work round continues automatically</span>
+        )}
       {checkpoint?.checkpoint_id && (
-        <span>Checkpoint {checkpoint.checkpoint_id}: {checkpoint.reason}</span>
+        <span>
+          Checkpoint {checkpoint.checkpoint_id}: {checkpoint.reason}
+        </span>
       )}
       {recoveryReason && <p>{recoveryReason}</p>}
       {session.usage_error?.message && (
-        <p role="status">Resource usage unavailable: {session.usage_error.message}</p>
+        <p role="status">
+          Resource usage unavailable: {session.usage_error.message}
+        </p>
       )}
+      <div
+        className="run-evidence-tokens"
+        role="group"
+        aria-label="Recorded token usage"
+      >
+        {tokenCounts.map(([key, label]) => {
+          const value = totals?.[key];
+          return (
+            <span key={key}>
+              {label}:{" "}
+              {typeof value === "number" &&
+              Number.isSafeInteger(value) &&
+              value >= 0
+                ? value
+                : "unavailable"}
+            </span>
+          );
+        })}
+        {!session.usage_error && session.usage?.usage_complete === false && (
+          <p>Token usage incomplete; recorded counts may be partial.</p>
+        )}
+      </div>
     </>
   );
 }
@@ -312,12 +347,13 @@ export function RunEvidence({ runId }: { runId: string }) {
                         {steps !== undefined && (
                           <span>{steps} model turns</span>
                         )}
-                        {saved.usage?.active_seconds !== undefined && saved.usage.active_seconds !== null && (
-                          <span>
-                            {Math.round(saved.usage.active_seconds)} seconds of active
-                            model work
-                          </span>
-                        )}
+                        {saved.usage?.active_seconds !== undefined &&
+                          saved.usage.active_seconds !== null && (
+                            <span>
+                              {Math.round(saved.usage.active_seconds)} seconds
+                              of active model work
+                            </span>
+                          )}
                         {saved.wait_for?.process_id && (
                           <span>
                             Waiting for process{" "}

@@ -903,7 +903,7 @@ Known domain failures: `404` NOT_FOUND; `409` REVISION_CONFLICT; `422` INVALID_C
 
 #### `POST /api/projects/{ident}/graph/commands`
 
-Apply one kernel command under the project writer transaction. The project request_id deduplicates saved command receipts before revision comparison; reuse it only for the same logical submission. Return public graph, impact, run_nodes and run_ids. run:true enqueues selected affected nodes. Preview conflicts/missing inputs must be inspected; undo restores graph content, not completed external effects.
+Apply one kernel command under the project writer transaction. The project request_id deduplicates saved command receipts before revision comparison; reuse it only for the same logical submission. Return public graph, impact, run_nodes and run_ids. run:true enqueues selected affected nodes. Preview conflicts/missing inputs must be inspected; undo restores graph content, not completed external effects. Invalid node patch, dependency endpoint, fork node-ID list or split-part shapes are rejected before execution with invalid_command and the offending field.
 
 | Parameter | Location | Type | Required | Default / description |
 | --- | --- | --- | --- | --- |
@@ -913,7 +913,7 @@ Body: `application/json`: `GraphCommand`; required.
 
 Success `200`: `application/json`: `GraphCommandResult`.
 
-Known domain failures: `400` Graph command errors; `404` NOT_FOUND or missing_node; `409` revision_conflict or patch_conflict; `422` CROSS_PROJECT.
+Known domain failures: `400` Graph command errors; `404` NOT_FOUND or missing_node; `409` revision_conflict or patch_conflict; `422` CROSS_PROJECT or invalid_command.
 
 #### `GET /api/projects/{ident}/graph/page`
 
@@ -933,7 +933,7 @@ Known domain failures: `404` NOT_FOUND.
 
 #### `POST /api/projects/{ident}/graph/preview`
 
-Require the current expected_revision. Return only GraphImpact, not a graph or receipt. Preview writes no graph/workspace changes. body.project_id, when set, must match the path project.
+Require the current expected_revision. Return only GraphImpact, not a graph or receipt. Preview writes no graph/workspace changes. body.project_id, when set, must match the path project. Invalid node patch, dependency endpoint, fork node-ID list or split-part shapes are rejected before execution with invalid_command and the offending field.
 
 | Parameter | Location | Type | Required | Default / description |
 | --- | --- | --- | --- | --- |
@@ -943,7 +943,7 @@ Body: `application/json`: `GraphCommand`; required.
 
 Success `200`: `application/json`: `GraphImpact`.
 
-Known domain failures: `400` Graph command errors; `404` NOT_FOUND or missing_node; `409` revision_conflict or patch_conflict; `422` CROSS_PROJECT.
+Known domain failures: `400` Graph command errors; `404` NOT_FOUND or missing_node; `409` revision_conflict or patch_conflict; `422` CROSS_PROJECT or invalid_command.
 
 ### Interventions
 

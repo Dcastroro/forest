@@ -225,6 +225,49 @@ class GraphCommandService:
                              detail={"expected_revision": command["expected_revision"], "current_revision": self.graph["revision"]})
         if command.get("operation") not in OPERATIONS:
             raise GraphError("unknown_operation", "Unknown graph command.")
+        self._check_shapes(command)
+
+    @staticmethod
+    def _check_shapes(command):
+        def invalid(field, expected):
+            raise GraphError("invalid_command", f"{field} must be {expected}.", detail={"field": field})
+
+        def identifier(value):
+            return isinstance(value, str) and bool(value)
+
+        def identifiers(value):
+            return isinstance(value, list) and all(identifier(item) for item in value)
+
+        params = command.get("params", {})
+        targets = command.get("targets", [])
+        if not isinstance(params, dict):
+            invalid("params", "an object")
+        if not identifiers(targets):
+            invalid("targets", "a list of non-empty node IDs")
+        if not targets and command.get("node_id"):
+            if not identifier(command["node_id"]):
+                invalid("node_id", "a non-empty node ID")
+            targets = [command["node_id"]]
+        operation = command["operation"]
+        if operation in {"edit_node", "apply_instruction_patch"}:
+            patch = params.get("patch", params)
+            field = "params.patch" if "patch" in params else "params"
+            if not isinstance(patch, dict):
+                invalid(field, "an object")
+            if "branch_id" in patch and not identifier(patch["branch_id"]):
+                invalid(field + ".branch_id", "a non-empty branch ID")
+        if operation in {"add_dependency", "remove_dependency"}:
+            for index, key in enumerate(("source", "target")):
+                value = params[key] if key in params else (targets[index] if len(targets) > index else None)
+                if not identifier(value):
+                    invalid("params." + key, "a non-empty node ID, or supplied in targets")
+        if operation in {"fork_branch", "clone_subtree"} and "node_ids" in params:
+            if not identifiers(params["node_ids"]) or not params["node_ids"]:
+                invalid("params.node_ids", "a non-empty list of node IDs")
+        if operation == "split_node" and "parts" in params:
+            parts = params["parts"]
+            if not isinstance(parts, list) or any(not isinstance(part, dict) for part in parts):
+                invalid("params.parts", "a list of node objects")
 
     def _execute(self, command, dry_run, defer_files=False, compound=False):
         self._check(command)

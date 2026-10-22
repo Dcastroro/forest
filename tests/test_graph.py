@@ -26,6 +26,54 @@ def command(g, operation, targets=None, **params):
     return {"project_id": "project", "request_id": "client-request", "expected_revision": g["revision"], "operation": operation, "targets": targets or [], "params": params}
 
 
+INVALID_SHAPES = (
+    [("edit_node", {"params": value}, "params") for value in [None, [], True, 0, "bad"]]
+    + [("edit_node", {"targets": value}, "targets") for value in [None, {}, True, "a", [None], [""], [{}]]]
+    + [(op, {"targets": ["a"], "params": {}}, "params.target")
+       for op in ["add_dependency", "remove_dependency"]]
+    + [("add_dependency", {"params": {"source": "a", "target": value}}, "params.target")
+       for value in [None, [], {}, True, 3.5]]
+    + [(op, {"params": {"patch": value}}, "params.patch")
+       for op in ["edit_node", "apply_instruction_patch"]
+       for value in [None, [], True, 0, "bad"]]
+    + [(op, {"params": {"node_ids": value}}, "params.node_ids")
+       for op in ["fork_branch", "clone_subtree"]
+       for value in [None, True, -1, 3.5, "a", {}, [], [None]]]
+    + [("split_node", {"params": {"parts": value}}, "params.parts")
+       for value in [None, True, 0, 3.5, "bad", {}, [None, {}]]]
+    + [("edit_node", {"params": {"patch": {"branch_id": value}}}, "params.patch.branch_id")
+       for value in [[], {}, None, True]]
+    + [("edit_node", {"params": {"branch_id": []}}, "params.branch_id")]
+)
+
+
+@pytest.mark.parametrize("method", ["preview", "apply", "apply_compound_step"])
+@pytest.mark.parametrize("operation, overrides, field", INVALID_SHAPES)
+def test_invalid_command_shapes_are_rejected_before_mutation(tmp_path, method, operation, overrides, field):
+    original = graph()
+    service = GraphCommandService(original, tmp_path)
+    before = deepcopy(service.graph)
+    cmd = {**command(original, operation, ["a"]), **overrides}
+    with pytest.raises(GraphError) as caught:
+        getattr(service, method)(cmd)
+    assert caught.value.code == "invalid_command"
+    assert caught.value.status_code == 422
+    assert field in caught.value.message
+    assert service.graph == before
+    assert original == graph()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dependency_shape_validation_preserves_legacy_node_id_source(tmp_path):
+    original = graph()
+    cmd = command(original, "add_dependency", target="other")
+    cmd.pop("targets")
+    cmd["node_id"] = "a"
+    updated = GraphCommandService(original, tmp_path).apply(cmd)["graph"]
+    assert any(edge["source"] == "a" and edge["target"] == "other"
+               and edge["relation"] == "depends_on" for edge in updated["edges"])
+
+
 def apply(g, root, operation, targets=None, **params):
     return GraphCommandService(g, root).apply(command(g, operation, targets, **params))
 

@@ -18986,7 +18986,7 @@
     },
     "/api/projects/{ident}/graph/commands": {
       "post": {
-        "description": "Apply one kernel command under the project writer transaction. The project request_id deduplicates saved command receipts before revision comparison; reuse it only for the same logical submission. Return public graph, impact, run_nodes and run_ids. run:true enqueues selected affected nodes. Preview conflicts/missing inputs must be inspected; undo restores graph content, not completed external effects.",
+        "description": "Apply one kernel command under the project writer transaction. The project request_id deduplicates saved command receipts before revision comparison; reuse it only for the same logical submission. Return public graph, impact, run_nodes and run_ids. run:true enqueues selected affected nodes. Preview conflicts/missing inputs must be inspected; undo restores graph content, not completed external effects. Invalid node patch, dependency endpoint, fork node-ID list or split-part shapes are rejected before execution with invalid_command and the offending field.",
         "operationId": "command_api_projects__ident__graph_commands_post",
         "parameters": [
           {
@@ -19078,7 +19078,7 @@
                 }
               }
             },
-            "description": "CROSS_PROJECT"
+            "description": "CROSS_PROJECT or invalid_command"
           },
           "500": {
             "content": {
@@ -19274,7 +19274,7 @@
     },
     "/api/projects/{ident}/graph/preview": {
       "post": {
-        "description": "Require the current expected_revision. Return only GraphImpact, not a graph or receipt. Preview writes no graph/workspace changes. body.project_id, when set, must match the path project.",
+        "description": "Require the current expected_revision. Return only GraphImpact, not a graph or receipt. Preview writes no graph/workspace changes. body.project_id, when set, must match the path project. Invalid node patch, dependency endpoint, fork node-ID list or split-part shapes are rejected before execution with invalid_command and the offending field.",
         "operationId": "preview_api_projects__ident__graph_preview_post",
         "parameters": [
           {
@@ -19366,7 +19366,7 @@
                 }
               }
             },
-            "description": "CROSS_PROJECT"
+            "description": "CROSS_PROJECT or invalid_command"
           },
           "500": {
             "content": {

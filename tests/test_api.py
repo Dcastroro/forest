@@ -1878,6 +1878,60 @@ def case_library_import_exports_books_with_persisted_publication_type(client, ap
     assert article.fields["pages"] == "4-9"
 
 
+def case_graph_command_shape_validation(client, app):
+    from fastapi.testclient import TestClient
+    from services.api.db import Session, CommandReceipt, TaskRun
+    from services.interventions.models import Intervention
+    from sqlalchemy import func, select
+
+    project = create(client)
+    first = add_node(client, project)
+    second = add_node(client, project)
+    before = graph(client, project)
+    bad = (
+        [(op, {}) for op in ("add_dependency", "remove_dependency")]
+        + [(op, {"patch": value}) for op in ("edit_node", "apply_instruction_patch")
+           for value in (None, True, [], 3.5)]
+        + [(op, {"node_ids": value}) for op in ("fork_branch", "clone_subtree")
+           for value in (None, True, -1, 3.5)]
+        + [("split_node", {"parts": value}) for value in (None, True, 0, 3.5, [None, {}])]
+        + [("edit_node", {"branch_id": value}) for value in ([], {})]
+        + [("add_dependency", {"source": first["id"], "target": value}) for value in ([], {})]
+    )
+    def side_effect_counts():
+        with Session() as session:
+            return tuple(session.scalar(select(func.count()).select_from(model))
+                         for model in (CommandReceipt, Intervention, TaskRun))
+
+    before_counts = side_effect_counts()
+    # Keep the real HTTP 500 visible on the original implementation.
+    requests = TestClient(app, raise_server_exceptions=False)
+    try:
+        requests.cookies.update(client.cookies)
+        for operation, params in bad:
+            for endpoint in ("preview", "commands"):
+                response = requests.post(f"/api/projects/{project['id']}/graph/{endpoint}", json={
+                    "request_id": str(uuid4()), "expected_revision": before["revision"],
+                    "operation": operation, "targets": [first["id"]], "params": params, "run": False,
+                })
+                detail = ok(response, 422)["detail"]
+                assert detail["code"] == "invalid_command"
+                assert detail["retryable"] is False
+                assert detail["field"].startswith("params.")
+                assert graph(client, project) == before
+                assert side_effect_counts() == before_counts
+    finally:
+        requests.close()
+    # A valid dependency with two target IDs still previews and commits normally.
+    valid = {"request_id": str(uuid4()), "expected_revision": before["revision"],
+             "operation": "add_dependency", "targets": [first["id"], second["id"]], "params": {}, "run": False}
+    ok(client.post(f"/api/projects/{project['id']}/graph/preview", json=valid))
+    assert graph(client, project) == before
+    result = ok(client.post(f"/api/projects/{project['id']}/graph/commands", json=valid))
+    assert result["graph"]["revision"] == before["revision"] + 1
+    assert any(edge["source"] == first["id"] and edge["target"] == second["id"] for edge in result["graph"]["edges"])
+
+
 CASES = [name.removeprefix("case_") for name in list(globals()) if name.startswith("case_")]
 
 

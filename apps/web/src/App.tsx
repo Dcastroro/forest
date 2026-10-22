@@ -898,12 +898,17 @@ function ProjectForm({
 }
 function Projects() {
   const { t, action } = useUI();
+  const pageSize = 100;
+  const [offset, setOffset] = useState(0);
   const {
     data: projects,
     error,
     loading,
     reload,
-  } = useLoad<Project[]>("/projects", []);
+  } = useLoad<Project[]>(
+    `/projects?limit=${pageSize + 1}&offset=${offset}`,
+    [],
+  );
   const [editing, setEditing] = useState<Project | null | false>(false);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("recent");
@@ -929,6 +934,7 @@ function Projects() {
       }
     });
   const list = projects
+    .slice(0, pageSize)
     .filter(
       (p) =>
         (showArchived || !p.archived) &&
@@ -1012,6 +1018,37 @@ function Projects() {
             </label>
           </div>
         </div>
+        <nav
+          className="section-toolbar"
+          aria-label={t("项目分页", "Project pages")}
+        >
+          <span role="status">
+            {t(
+              `第 ${offset / pageSize + 1} 页`,
+              `Page ${offset / pageSize + 1}`,
+            )}
+          </span>
+          <div className="toolbar-actions">
+            <Button
+              disabled={loading || offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - pageSize))}
+            >
+              {t("上一页", "Previous")}
+            </Button>
+            <Button
+              disabled={loading || !!error || projects.length <= pageSize}
+              onClick={() => setOffset(offset + pageSize)}
+            >
+              {t("下一页", "Next")}
+            </Button>
+          </div>
+        </nav>
+        <p className="muted">
+          {t(
+            "筛选和排序仅适用于当前页（最多 100 个项目）。",
+            "Filters and sorting apply to this page (up to 100 projects).",
+          )}
+        </p>
         <ErrorBox error={error} retry={reload} />
         {loading ? (
           <Loading />
@@ -1102,7 +1139,22 @@ function Projects() {
         ) : (
           !error && (
             <Empty
-              title={t("暂无项目", "No projects")}
+              title={
+                projects.length || offset > 0
+                  ? t(
+                      "当前页没有匹配的项目",
+                      "No matching projects on this page",
+                    )
+                  : t("暂无项目", "No projects")
+              }
+              description={
+                projects.length || offset > 0
+                  ? t(
+                      "请尝试其他页面或更改筛选条件。",
+                      "Try another page or change the filters.",
+                    )
+                  : undefined
+              }
               action={
                 <Button className="primary" onClick={() => setEditing(null)}>
                   <Plus size={15} />

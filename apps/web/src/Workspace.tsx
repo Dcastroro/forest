@@ -261,15 +261,18 @@ function WorkspaceInner({
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const updateQuery = useCallback(
-    (patch: Record<string, string | null>) => {
-      setSearchParams((current) => {
-        const next = new URLSearchParams(current);
-        for (const [key, value] of Object.entries(patch)) {
-          if (value) next.set(key, value);
-          else next.delete(key);
-        }
-        return next;
-      });
+    (patch: Record<string, string | null>, replace = false) => {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          for (const [key, value] of Object.entries(patch)) {
+            if (value) next.set(key, value);
+            else next.delete(key);
+          }
+          return next;
+        },
+        { replace },
+      );
     },
     [setSearchParams],
   );
@@ -282,8 +285,18 @@ function WorkspaceInner({
     [updateQuery, onSelectedNode],
   );
   const branch = searchParams.get("branch") || "all";
-  const setBranch = (branchId: string) =>
-    updateQuery({ branch: branchId === "all" ? null : branchId });
+  const setBranch = (branchId: string) => {
+    const clearSelection =
+      branchId !== "all" &&
+      graph.nodes.some(
+        (item) => item.id === selected && item.branch_id !== branchId,
+      );
+    updateQuery({
+      branch: branchId === "all" ? null : branchId,
+      ...(clearSelection ? { node: null } : {}),
+    });
+    if (clearSelection) setInspector(false);
+  };
   const view =
     !readingPanelOpen && searchParams.get("view") === "focus"
       ? "focus"
@@ -380,7 +393,19 @@ function WorkspaceInner({
     }),
     [],
   );
-  const node = graph.nodes.find((n) => n.id === selected);
+  const selectedNode = graph.nodes.find((n) => n.id === selected);
+  const node =
+    branch === "all" || selectedNode?.branch_id === branch
+      ? selectedNode
+      : undefined;
+  useEffect(() => {
+    // A direct link or history navigation can also select an off-branch node.
+    // Guard the editor during that render, then reconcile URL state in place.
+    if (selectedNode && branch !== "all" && selectedNode.branch_id !== branch) {
+      updateQuery({ node: null }, true);
+      setInspector(false);
+    }
+  }, [selectedNode, branch, updateQuery]);
   const positionRevisions = useRef(new Map<string, number>());
   const positionOnlyRevisions = useRef(new Map<string, Set<number>>());
   const positionConflictRetries = useRef(new Map<string, number>());
@@ -738,7 +763,7 @@ function WorkspaceInner({
     return () => window.removeEventListener("forest-refresh", refresh);
   }, [reload, reloadRuns, selectedRun.reload]);
   useEffect(() => {
-    if (selected) setInspector(true);
+    setInspector(Boolean(selected));
   }, [selected, id]);
   useEffect(() => {
     if (selectedRunId) {

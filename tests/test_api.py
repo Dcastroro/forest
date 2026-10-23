@@ -1932,6 +1932,39 @@ def case_graph_command_shape_validation(client, app):
     assert any(edge["source"] == first["id"] and edge["target"] == second["id"] for edge in result["graph"]["edges"])
 
 
+def case_invalid_task_kind_does_not_write_graph_or_enqueue(client, app):
+    from sqlalchemy import func, select
+    from services.api.db import CommandReceipt, Session, TaskRun
+    from services.interventions.models import Intervention
+
+    project = create(client)
+    node = add_node(client, project, config={"kind": "command", "command": [sys.executable, "-c", "pass"]})
+    before = graph(client, project)
+    with Session() as session:
+        counts = tuple(session.scalar(select(func.count()).select_from(model))
+                       for model in (CommandReceipt, Intervention, TaskRun))
+    for operation, params in [
+        ("add_node", {"type": "experiment", "config": {"kind": "not_a_real_kind"}}),
+        ("add_node", {"node": {"type": "experiment", "config": {"kind": "not_a_real_kind"}}}),
+        ("edit_node", {"config": {"kind": "not_a_real_kind"}}),
+        ("edit_node", {"patch": {"config": {"kind": "not_a_real_kind"}}}),
+    ]:
+        for endpoint in ("preview", "commands"):
+            response = client.post(f"/api/projects/{project['id']}/graph/{endpoint}", json={
+                "request_id": str(uuid4()), "expected_revision": before["revision"],
+                "operation": operation, "targets": [node["id"]] if operation == "edit_node" else [],
+                "params": params, "run": True,
+            })
+            assert ok(response, 422)["detail"]["code"] == "invalid_task_kind"
+            assert graph(client, project) == before
+    response = client.patch(f"/api/nodes/{node['id']}", json={"config": {"kind": "not_a_real_kind"}})
+    assert ok(response, 422)["detail"]["code"] == "invalid_task_kind"
+    assert graph(client, project) == before
+    with Session() as session:
+        assert tuple(session.scalar(select(func.count()).select_from(model))
+                     for model in (CommandReceipt, Intervention, TaskRun)) == counts
+
+
 CASES = [name.removeprefix("case_") for name in list(globals()) if name.startswith("case_")]
 
 

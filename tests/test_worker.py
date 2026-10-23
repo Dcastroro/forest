@@ -947,6 +947,27 @@ def test_worker_restart_recovers_running_job_without_duplicate_execution(actual_
     assert complete["worker_id"] != active["worker_id"]
 
 
+@pytest.mark.parametrize("exit_code", [0, 7])
+@pytest.mark.parametrize("edited", [False, True])
+def test_current_run_clears_stale_context_only_on_success(actual_worker, exit_code, edited):
+    h = actual_worker
+    _, node = h.project_node(seconds=0.1)
+    if edited:
+        assert h.terminal(h.launch(node))["status"] == "completed"
+    h.request("PATCH", f"/api/nodes/{node['id']}", json={"config": {
+        "kind": "command", "command": [sys.executable, "-c", f"raise SystemExit({exit_code})"],
+    }})
+    current = h.request("GET", f"/api/nodes/{node['id']}")
+    assert current["context_stale"] is True
+    run = h.launch(current)
+    assert h.terminal(run)["status"] == ("completed" if exit_code == 0 else "failed")
+    after = h.request("GET", f"/api/nodes/{node['id']}")
+    assert after["latest_run_id"] == run["id"]
+    assert after["result_revision"] == current["revision"]
+    assert after["results_current"] is (exit_code == 0)
+    assert after["context_stale"] is (exit_code != 0)
+
+
 def test_old_revision_result_does_not_overwrite_edited_node(actual_worker):
     h = actual_worker
     _, node = h.project_node(seconds=2)
@@ -961,6 +982,7 @@ def test_old_revision_result_does_not_overwrite_edited_node(actual_worker):
     assert after["instructions"] == "New research content"
     assert after["outputs"] == before["outputs"]
     assert after["deliverable_status"] == before["deliverable_status"]
+    assert after["context_stale"] is True
 
 
 def test_retry_of_edited_node_preserves_source_revision_and_current_result(actual_worker):
@@ -991,7 +1013,7 @@ def test_retry_of_edited_node_preserves_source_revision_and_current_result(actua
     current_before_retry = h.request("GET", f"/api/nodes/{node['id']}")
     assert current_before_retry["revision"] == 2
     preserved_fields = ("execution_status", "outputs", "deliverable_status", "latest_run_id",
-                        "verification_status", "results_current", "last_run_id", "result_revision")
+                        "verification_status", "results_current", "last_run_id", "result_revision", "context_stale")
     preserved = {key: current_before_retry.get(key) for key in preserved_fields}
 
     retry = h.request("POST", f"/api/runs/{source['id']}/retry", json={"request_id": str(uuid.uuid4())})
@@ -1018,6 +1040,7 @@ def test_retry_of_edited_node_preserves_source_revision_and_current_result(actua
     assert current_after_control["latest_run_id"] == control["id"]
     assert current_after_control["results_current"] is True
     assert current_after_control["result_revision"] == 2
+    assert current_after_control["context_stale"] is False
 
 
 def test_historical_retry_does_not_shadow_current_verified_producer(actual_worker):
@@ -1317,6 +1340,7 @@ def test_upstream_invalidation_after_enqueue_preserves_descendant_rerun(actual_w
     assert bool(current_child.get("needs_rerun")) == (node_type == "experiment"), current_child
     assert current_child["deliverable_status"] == "needs_update", current_child
     assert current_child.get("results_current") is False, current_child
+    assert current_child["context_stale"] is True, current_child
     assert current_child.get("last_run_id") == accepted_child_run["id"], current_child
     assert current_child["outputs"][0]["id"] == accepted_child_run["id"], current_child
 
@@ -1361,6 +1385,7 @@ def test_restart_does_not_promote_invalidated_first_refresh_result(actual_worker
     assert h.terminal(h.launch(source))["status"] == "completed"
     after = h.request("GET", f"/api/nodes/{child['id']}")
     assert after.get("results_current") is False, after
+    assert after["context_stale"] is True, after
     assert after["deliverable_status"] == "needs_update", after
     assert not after.get("result_revision") and not after["outputs"], after
     assert after["latest_run_id"] == run["id"]

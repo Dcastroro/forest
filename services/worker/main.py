@@ -1034,6 +1034,8 @@ class WorkerLoop:
                             current_result={**n.extra,'results_current':r.status=='completed','last_run_id':r.id,'result_revision':r.node_revision,
                                 'verification_status':r.resource.get('verification_status','unverified')}
                             current_result['needs_rerun'] = r.status != 'completed'
+                            if r.status == 'completed':
+                                current_result['context_stale'] = False
                             n.extra=current_result
                             if r.kind=='experiment' and r.status=='completed':
                                 recovery=r.metrics.get('mechanism_recovery',[])

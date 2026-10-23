@@ -27,6 +27,22 @@ OPERATIONS = {"add_node", "edit_node", "delete_node", "add_dependency", "remove_
 ANALYSIS_TYPES = {"analysis", "statistics", "statistical_analysis", "evaluation"}
 FIGURE_TYPES = {"figure", "chart"}
 PAPER_TYPES = {"paper", "writing", "review"}
+TASK_KINDS = frozenset({
+    "agent", "command", "experiment", "analysis", "verification", "repository_clone",
+    "research_analysis", "research_plan", "research_route_review", "figure", "figure_revise",
+    "paper_generate", "paper_compile", "paper_revise", "literature", "ideas", "suggest_paths", "review",
+})
+
+
+def _validate_task_kind(config):
+    if not isinstance(config, dict) or "kind" not in config:
+        return
+    kind = config["kind"]
+    if kind is None or kind == "":
+        return
+    if not isinstance(kind, str) or kind not in TASK_KINDS:
+        raise GraphError("invalid_task_kind", "config.kind must name a supported worker task kind.",
+                         detail={"field": "config.kind", "allowed": sorted(TASK_KINDS)})
 
 
 def _uid():
@@ -306,6 +322,7 @@ class GraphCommandService:
 
         def add(fields=None, branch_id=None):
             fields = deepcopy(fields or {})
+            _validate_task_kind(fields.get("config"))
             nid = fields.pop("id", None) or identifier()
             if nid in nodes:
                 raise GraphError("duplicate_node", f"Node {nid} already exists.")
@@ -436,6 +453,7 @@ class GraphCommandService:
             immutable = {"id", "project_id", "revision", "execution_status", "last_run_id", "last_run_revision"}
             if immutable & patch.keys():
                 raise GraphError("invalid_patch", "Use runtime endpoints to change execution state; identifiers and revision are managed by the kernel.")
+            _validate_task_kind(patch.get("config"))
             for target in targets:
                 node = require(target)
                 node_patch = {k:v for k,v in patch.items() if k != 'stop_current_run'}
